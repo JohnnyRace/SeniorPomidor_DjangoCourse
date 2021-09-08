@@ -307,3 +307,304 @@ coverage html
 * Зелёные линии - участок кода куда заходил тест
 * Красные линии - не протестированный участок когда
 
+
+### 3. Filters, Search and Ordering
+
+Установим `django-filter`. Теперь мы можем настраивать фильтры во `views.py`.
+Допишем в `BookViewSet` следующие строки
+```python
+    filter_backends = [DjangoFilterBackend]
+    filter_fields = ['price']
+```
+Далее для стандартного отображения данных в `json` формате, определим его в `settings.py`
+```python
+REST_FRAMEWORK = {
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+        # 'rest_framework.renderers.BrowsableAPIRenderer',
+    ],
+    'DEFAULT_PARSER_CLASSES': [
+        'rest_framework.parsers.JSONParser',
+    ]
+}
+```
+Запускаем сервер и проверяем фильтр по цене
+
+![img_4.png](img_4.png)
+
+Как видим всё работает!
+Но надоедает добавлять книги через `shell` Django.
+Сделаем всё интерактивно в `admin.py`
+```python
+from django.contrib import admin
+from django.contrib.admin import ModelAdmin
+
+from store.models import Book
+
+
+@admin.register(Book)
+class BookAdmin(ModelAdmin):
+    pass
+```
+Заходим в админку, Books и видим
+
+![img_5.png](img_5.png)
+
+Сделаем более человечный вывод книг в `models.py`
+```python
+from django.db import models
+
+
+class Book(models.Model):
+    name = models.CharField(max_length=255)
+    price = models.DecimalField(max_digits=7, decimal_places=2)
+
+    def __str__(self):
+        return f'Id {self.id}: {self.name}'
+
+```
+Обновим страницу
+
+![img_6.png](img_6.png)
+
+Теперь лучше!
+Теперь настроим поиск. Для этого снова изменим `models.py` добавив имя автора в модель книги
+```python
+author_name = models.CharField(max_length=255)
+```
+Теперь книги имеют следующие поля
+
+![img_7.png](img_7.png)
+
+Далее настраиваем поиск. Изменим `filter_backends` в `views.py`
+```python
+filter_backends = [DjangoFilterBackend, SearchFilter]
+```
+Также добавим поля, по которым будет происходить поиск. Желательно от двух полей, поскольку иначе это фильтр
+```python
+search_fields = ['name', 'author_name']
+```
+По запросу в браузере `http://127.0.0.1:8000/book/?search=Leo`
+получим найденные книги
+```json
+[
+  {"id":4,"name":"War and Peace","price":"20000.00","author_name":"Leo Tolstoy"},
+  {"id":5,"name":"Anna Karenina","price":"19000.00","author_name":"Leo Tolstoy"},
+  {"id":6,"name":"Life of Leo Tolstoy","price":"1300.00","author_name":"Joe Biden"}
+]
+```
+Добавим сортировку
+```python
+from rest_framework.filters import SearchFilter, OrderingFilter
+...
+...
+filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+ordering_fields = ['price', 'author_name']
+```
+Теперь по запросу `http://127.0.0.1:8000/book/?ordering=price`
+мы увидим отсортированные книги
+```json
+[
+  {
+    "id": 2,
+    "name": "Perfume",
+    "price": "500.00",
+    "author_name": "Petrick Suskind"
+  },
+  {
+    "id": 1,
+    "name": "The Collector",
+    "price": "1000.00",
+    "author_name": "John Fowles"
+  },
+  {
+    "id": 3,
+    "name": "In Search of Lost Time",
+    "price": "1200.00",
+    "author_name": "Marcel Proust"
+  },
+  {
+    "id": 6,
+    "name": "Life of Leo Tolstoy",
+    "price": "1300.00",
+    "author_name": "Joe Biden"
+  },
+  {
+    "id": 5,
+    "name": "Anna Karenina",
+    "price": "19000.00",
+    "author_name": "Leo Tolstoy"
+  },
+  {
+    "id": 4,
+    "name": "War and Peace",
+    "price": "20000.00",
+    "author_name": "Leo Tolstoy"
+  }
+]
+```
+Код отформатирован, для лучшей наглядности!
+По запросу `http://127.0.0.1:8000/book/?ordering=-price` сортировка будет по убыванию
+```json
+[
+  {
+    "id": 4,
+    "name": "War and Peace",
+    "price": "20000.00",
+    "author_name": "Leo Tolstoy"
+  },
+  {
+    "id": 5,
+    "name": "Anna Karenina",
+    "price": "19000.00",
+    "author_name": "Leo Tolstoy"
+  },
+  {
+    "id": 6,
+    "name": "Life of Leo Tolstoy",
+    "price": "1300.00",
+    "author_name": "Joe Biden"
+  },
+  {
+    "id": 3,
+    "name": "In Search of Lost Time",
+    "price": "1200.00",
+    "author_name": "Marcel Proust"
+  },
+  {
+    "id": 1,
+    "name": "The Collector",
+    "price": "1000.00",
+    "author_name": "John Fowles"
+  },
+  {
+    "id": 2,
+    "name": "Perfume",
+    "price": "500.00",
+    "author_name": "Petrick Suskind"
+  }
+]
+```
+Теперь напишем тесты для фильтрации и поиска.
+Также немного улучшим код, исключив повторения
+```python
+class BooksApiTestCase(APITestCase):
+    def setUp(self):
+        self.book_1 = Book.objects.create(name='Test book 1', price=25, author_name='Author 1')
+        self.book_2 = Book.objects.create(name='Test book 2', price=55, author_name='Author 5')
+        self.book_3 = Book.objects.create(name='Test book Author 1', price=55, author_name='Author 2')
+
+    def test_get(self):
+        url = reverse('book-list')
+        response = self.client.get(url)
+        serializer_data = BooksSerializer([self.book_1, self.book_2, self.book_3], many=True).data
+        self.assertEqual(status.HTTP_200_OK, response.status_code)
+        self.assertEqual(serializer_data, response.data)
+
+    def test_get_filter(self):
+        url = reverse('book-list')
+        response = self.client.get(url, data={'price': 55})
+        serializer_data = BooksSerializer([self.book_2, self.book_3], many=True).data
+        self.assertEqual(status.HTTP_200_OK, response.status_code)
+        self.assertEqual(serializer_data, response.data)
+
+    def test_get_search(self):
+        url = reverse('book-list')
+        response = self.client.get(url, data={'search': 'Author 1'})
+        serializer_data = BooksSerializer([self.book_1, self.book_3], many=True).data
+        self.assertEqual(status.HTTP_200_OK, response.status_code)
+        self.assertEqual(serializer_data, response.data)
+
+    def test_get_ordering(self):
+        url = reverse('book-list')
+        response = self.client.get(url, data={'ordering': 'price'})
+        serializer_data = BooksSerializer([self.book_1, self.book_2, self.book_3], many=True).data
+        self.assertEqual(status.HTTP_200_OK, response.status_code)
+        self.assertEqual(serializer_data, response.data)
+```
+В функции `setUp` выполняются действия перед каждым тестом.
+
+### 4. OAuth
+
+Добавим в `BookViewSet`
+```python
+permission_classes = [IsAuthenticated]
+```
+Теперь когда мы обратимся к нашей странице, будет выдано следующее сообщение
+```json
+{"detail": "Authentication credentials were not provided."}
+```
+Если этого не выдало, а вы получили тот же результат, что и раньше, то вам нужно выйти из уже авторизованного пользователя.
+Вероятнее всего это был `admin`.
+
+Установим пакет `social-auth-app-django`. Добавим приложение `social_django` в `INSTALLED_APPS`
+```python
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+
+    'social_django',
+
+    'store',
+]
+```
+Рекомендуется сохранять последовательность:
+* Приложения джанго
+* Другие установленные приложения
+* Приложения, которые написали сами
+
+Выполним
+```bash
+./manage.py migrate
+```
+Теперь разрешим аутентификатору пользоваться `json` полями в постгресе.
+Для этого нужно добавить настройку в `settings.py`
+```python
+SOCIAL_AUTH_POSTGRES_JSONFIELD = True
+```
+Также добавим
+```python
+AUTHENTICATION_BACKENDS = (
+    'social_core.backends.github.GithubOAuth2',
+    'django.contrib.auth.backends.ModelBackend',
+)
+SOCIAL_AUTH_GITHUB_KEY = 'a1b2c3d4'
+SOCIAL_AUTH_GITHUB_SECRET = 'e5f6g7h8i9'
+```
+Изменим `urlpatterns` и импортируем всё из `django.conf` и `django.urls`
+```python
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    url('', include('social_django.urls', namespace='social'))
+]
+```
+Для кастомизации пространства имён (namespace) можно добавить настройку
+```python
+SOCIAL_AUTH_URL_NAMESPACE = 'social'
+```
+Она нужна для работы `reverse` на наших урлах.
+
+Кратко что будет происходить, как работает аутентификация.
+Запустив сервер мы увидим следующую ошибку
+```
+Using the URLconf defined in books.urls, Django tried these URL patterns, in this order:
+    1. admin/
+    2. login/<str:backend>/ [name='begin']
+    3. complete/<str:backend>/ [name='complete']
+    4. disconnect/<str:backend>/ [name='disconnect']
+    5. disconnect/<str:backend>/<int:association_id>/ [name='disconnect_individual']
+    6. ^book/$ [name='book-list']
+    7. ^book/(?P<pk>[^/.]+)/$ [name='book-detail']
+```
+Пользователя будет перебрасывать на `GitHub`, где он будет вводить свои данные.
+Если он авторизован, то ему будет достаточно нажать, что он согласен, что его будет авторизовывать данное приложение через `GitHub`.
+`GitHub` в свою очередь посылает нам ответ, что пользователь авторизован.
+
+Как работает OAuth
+
+![img_8.png](img_8.png)
+
